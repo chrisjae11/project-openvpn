@@ -1,0 +1,6 @@
+terraform/.terraform/
+terraform/terraform.tfvars
+terraform/backend.tf
+terraform/aws_hosts
+terraform/mykey
+terraform/mykey.pub

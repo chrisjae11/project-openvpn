@@ -1,0 +1,60 @@
+---
+- hosts: all
+  become: true
+  remote_user: ubuntu
+  vars_files:
+    - vars/main.yml
+  tasks:
+    - name: Install Docker Module for Python
+      pip: name="{{item}}" state=latest
+      loop: ['docker-py', 'pexpect']
+    - name: Ensure openvpn config is generated
+      docker_container:
+        name: "tmp-openvpn-genconfig"
+        image: "{{openvpn_docker_image}}"
+        detach: no
+        cleanup: yes
+        volumes:
+          - "{{openvpn_data_volume}}:/etc/openvpn"
+        entrypoint: "ovpn_genconfig -u udp://{{domain}}"
+    - name: "Generate PKI"
+      expect:
+        command: docker run -v {{openvpn_data_volume}}:/etc/openvpn --rm -it {{openvpn_docker_image}} ovpn_initpki
+        timeout: 300
+        responses:
+          "Enter New CA Key Passphrase": "{{openvpn_pki_pass}}"
+          "Re-Enter New CA Key Passphrase": "{{openvpn_pki_pass}}"
+          "Common Name": "{{public_domain}}"
+          "Enter pass phrase for /etc/openvpn/pki/private/ca.key:": "{{openvpn_pki_pass}}"
+    - name: Ensure openvpn containers are started
+      docker_container:
+        name: "ovpn-{{item.proto}}"
+        image: "{{openvpn_docker_image}}"
+        pull: true
+        state: started
+        restart_policy: always
+        capabilities:
+          - NET_ADMIN
+        privileged: yes
+        ports:
+          - "{{item.port}}:1194/{{item.proto}}"
+        volumes:
+          - "{{openvpn_data_volume}}:/etc/openvpn"
+        command: ovpn_run --proto {{item.proto}}
+      with_items:
+       - { port: 1194, proto: udp }
+       - { port: 443, proto: tcp }
+      register: "docker_vpn_container_status"
+    - name: Ensure client keys are generated
+      expect:
+        command: "docker run -v {{openvpn_data_volume}}:/etc/openvpn --rm -it {{openvpn_docker_image}} easyrsa build-client-full {{item}} nopass"
+        responses:
+          "Enter pass phrase": "{{openvpn_pki_pass}}"
+      with_items: "{{openvpn_clients}}"
+    - name: Save generated keys
+      shell: docker run -v "{{openvpn_data_volume}}:/etc/openvpn" --rm "{{openvpn_docker_image}}" ovpn_getclient {{item}} > ~/{{item}}.ovpn
+      with_items: "{{openvpn_clients}}"
+    - name: Fetch clients
+      fetch: src=/root/{{item}}.ovpn  dest=/home/{{user}}/vpn-ca/ flat=yes
+      with_items:
+        - "{{openvpn_clients}}"

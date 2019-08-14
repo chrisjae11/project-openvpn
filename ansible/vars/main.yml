@@ -1,0 +1,9 @@
+---
+openvpn_docker_image: "kylemanna/openvpn"
+openvpn_data_volume: "ovpn-data"
+public_domain: "kube8-vpn"
+openvpn_pki_pass: redhat
+openvpn_clients:
+  - client1
+  - client2
+user: chris
